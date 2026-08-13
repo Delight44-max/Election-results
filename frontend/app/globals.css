@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-paper text-ink font-body antialiased;
+  }
+  h1, h2, h3, h4 {
+    @apply font-display;
+  }
+  ::selection {
+    @apply bg-gold-light/60;
+  }
+  *:focus-visible {
+    outline: 2px solid #1F5C46;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /* Signature "collation sheet" tally card: evokes the paper result-collation
+     sheets this dataset originates from, with a stamped seal for the winner. */
+  .tally-row {
+    @apply flex items-center justify-between gap-3 py-2.5 border-b border-line last:border-b-0;
+  }
+  .tally-leader {
+    @apply flex-1 border-b border-dotted border-line/0 mx-2 relative top-[2px];
+    background-image: linear-gradient(to right, #D8DDD4 33%, rgba(255,255,255,0) 0%);
+    background-position: bottom;
+    background-size: 6px 1px;
+    background-repeat: repeat-x;
+    height: 1px;
+  }
+  .stat-figure {
+    @apply font-mono tabular-nums tracking-tight;
+  }
+  .seal {
+    @apply relative inline-flex items-center justify-center rounded-full border-2 border-gold text-gold font-display font-semibold uppercase tracking-widest;
+  }
+  .card {
+    @apply bg-surface border border-line rounded-card shadow-card;
+  }
+  .skeleton {
+    @apply animate-pulse bg-line/60 rounded;
+  }
+}

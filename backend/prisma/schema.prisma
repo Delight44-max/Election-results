@@ -1,0 +1,188 @@
+// Prisma schema for the Bincom Election Results platform
+// Migrated from the original MySQL/phpMyAdmin dump (bincomphptest) to PostgreSQL (Neon).
+//
+// MIGRATION NOTES (read database/postgres-migration.sql and README.md for the full write-up):
+// - AUTO_INCREMENT -> Prisma `@default(autoincrement())` (Postgres SERIAL/IDENTITY).
+// - MyISAM/InnoDB engine directives dropped (Postgres has one storage engine).
+// - latin1 -> UTF-8 (Postgres default).
+// - `lga`.`lga_id` and `ward`.`ward_id` are the dump's *business* identifiers used by other
+//   tables as foreign keys (NOT the `uniqueid` auto-increment column). `lga_id` is globally
+//   unique in this dataset (single-state dump), so it is used as the relation target for
+//   `ward.lga_id`, `polling_unit.lga_id` and `announced_lga_results` (whose `lga_name` column
+//   actually stores the LGA's numeric id, e.g. '33' = Warri North -> lga_id 33). This was
+//   confirmed by cross-checking the dump's data, not assumed.
+// - `ward_id` is only unique *within* an LGA in the source data, so it is kept as a plain
+//   descriptive field rather than a relation target. `polling_unit.uniquewardid` maps to the
+//   ward's global `uniqueid` and is used as the real FK where present.
+// - `announced_pu_results.polling_unit_uniqueid` matches `polling_unit.uniqueid` values in the
+//   dump, so it is modelled as a real foreign key.
+// - `announced_state_results` and `announced_ward_results` exist in the dump but contain zero
+//   rows; the models are kept (for API completeness / future data) but are not seeded.
+// - 170 `polling_unit` rows in the dump are blank placeholders (lga_id/ward_id/polling_unit_id
+//   all 0, no name, no linked results or agents) and are skipped at seed time rather than
+//   seeded against a fabricated placeholder LGA — see prisma/seed.ts.
+// - All 4 `agentname` rows reference `pollingunit_uniqueid` values (1, 2) that do not exist
+//   anywhere in `polling_unit` (the table starts at uniqueid 8) — a dangling reference already
+//   present in the source MySQL dump, invisible there because MyISAM never enforced foreign
+//   keys. Rather than drop these agent records, `AgentName.pollingUnitUniqueId` is modelled as
+//   optional/nullable, and the seed script sets it to NULL when the referenced unit doesn't
+//   exist, preserving the agent's own data without fabricating a polling-unit link.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model State {
+  stateId   Int    @id @map("state_id")
+  stateName String @map("state_name") @db.VarChar(50)
+
+  lgas Lga[]
+
+  @@map("states")
+}
+
+model Lga {
+  uniqueId        Int       @id @default(autoincrement()) @map("uniqueid")
+  lgaId           Int       @unique @map("lga_id")
+  lgaName         String    @map("lga_name") @db.VarChar(50)
+  stateId         Int       @map("state_id")
+  lgaDescription  String?   @map("lga_description")
+  enteredByUser   String?   @map("entered_by_user") @db.VarChar(50)
+  dateEntered     DateTime? @map("date_entered")
+  userIpAddress   String?   @map("user_ip_address") @db.VarChar(50)
+
+  state          State                  @relation(fields: [stateId], references: [stateId])
+  wards          Ward[]
+  pollingUnits   PollingUnit[]
+  results        AnnouncedLgaResult[]
+
+  @@index([stateId])
+  @@map("lga")
+}
+
+model Ward {
+  uniqueId        Int       @id @default(autoincrement()) @map("uniqueid")
+  wardId          Int       @map("ward_id")
+  wardName        String    @map("ward_name") @db.VarChar(50)
+  lgaId           Int       @map("lga_id")
+  wardDescription String?   @map("ward_description")
+  enteredByUser   String?   @map("entered_by_user") @db.VarChar(50)
+  dateEntered     DateTime? @map("date_entered")
+  userIpAddress   String?   @map("user_ip_address") @db.VarChar(50)
+
+  lga          Lga           @relation(fields: [lgaId], references: [lgaId])
+  pollingUnits PollingUnit[]
+
+  @@index([lgaId])
+  @@map("ward")
+}
+
+model PollingUnit {
+  uniqueId                Int       @id @default(autoincrement()) @map("uniqueid")
+  pollingUnitId            Int       @map("polling_unit_id")
+  wardId                   Int       @map("ward_id")
+  lgaId                    Int       @map("lga_id")
+  uniqueWardId              Int?      @map("uniquewardid")
+  pollingUnitNumber        String?   @map("polling_unit_number") @db.VarChar(50)
+  pollingUnitName          String?   @map("polling_unit_name") @db.VarChar(255)
+  pollingUnitDescription   String?   @map("polling_unit_description")
+  lat                      String?   @map("lat") @db.VarChar(255)
+  long                     String?   @map("long") @db.VarChar(255)
+  enteredByUser            String?   @map("entered_by_user") @db.VarChar(50)
+  dateEntered              DateTime? @map("date_entered")
+  userIpAddress            String?   @map("user_ip_address") @db.VarChar(50)
+
+  lga     Lga                   @relation(fields: [lgaId], references: [lgaId])
+  ward    Ward?                 @relation(fields: [uniqueWardId], references: [uniqueId])
+  results AnnouncedPuResult[]
+  agents  AgentName[]
+
+  @@index([lgaId])
+  @@index([uniqueWardId])
+  @@map("polling_unit")
+}
+
+model Party {
+  id        Int    @id @default(autoincrement())
+  partyId   String @unique @map("partyid") @db.VarChar(11)
+  partyName String @map("partyname") @db.VarChar(50)
+
+  @@map("party")
+}
+
+model AgentName {
+  nameId               Int     @id @default(autoincrement()) @map("name_id")
+  firstname            String  @db.VarChar(255)
+  lastname             String  @db.VarChar(255)
+  email                String? @db.VarChar(255)
+  phone                String  @db.VarChar(20)
+  // Nullable: 4 rows in the source dump reference a polling unit id that doesn't exist
+  // anywhere in `polling_unit` (see schema-level note above). Left NULL rather than dropped.
+  pollingUnitUniqueId  Int?    @map("pollingunit_uniqueid")
+
+  pollingUnit PollingUnit? @relation(fields: [pollingUnitUniqueId], references: [uniqueId])
+
+  @@index([pollingUnitUniqueId])
+  @@map("agentname")
+}
+
+model AnnouncedLgaResult {
+  resultId          Int      @id @default(autoincrement()) @map("result_id")
+  lgaId             Int      @map("lga_id")
+  partyAbbreviation String   @map("party_abbreviation") @db.VarChar(10)
+  partyScore        Int      @map("party_score")
+  enteredByUser     String?  @map("entered_by_user") @db.VarChar(50)
+  dateEntered       DateTime @map("date_entered")
+  userIpAddress     String?  @map("user_ip_address") @db.VarChar(50)
+
+  lga Lga @relation(fields: [lgaId], references: [lgaId])
+
+  @@index([lgaId])
+  @@index([partyAbbreviation])
+  @@map("announced_lga_results")
+}
+
+model AnnouncedPuResult {
+  resultId              Int      @id @default(autoincrement()) @map("result_id")
+  pollingUnitUniqueId    Int      @map("polling_unit_uniqueid")
+  partyAbbreviation      String   @map("party_abbreviation") @db.VarChar(10)
+  partyScore             Int      @map("party_score")
+  enteredByUser          String?  @map("entered_by_user") @db.VarChar(50)
+  dateEntered            DateTime @map("date_entered")
+  userIpAddress          String?  @map("user_ip_address") @db.VarChar(50)
+
+  pollingUnit PollingUnit @relation(fields: [pollingUnitUniqueId], references: [uniqueId])
+
+  @@index([pollingUnitUniqueId])
+  @@index([partyAbbreviation])
+  @@map("announced_pu_results")
+}
+
+model AnnouncedStateResult {
+  resultId          Int      @id @default(autoincrement()) @map("result_id")
+  stateName         String   @map("state_name") @db.VarChar(50)
+  partyAbbreviation String   @map("party_abbreviation") @db.VarChar(10)
+  partyScore        Int      @map("party_score")
+  enteredByUser     String?  @map("entered_by_user") @db.VarChar(50)
+  dateEntered       DateTime @map("date_entered")
+  userIpAddress     String?  @map("user_ip_address") @db.VarChar(50)
+
+  @@map("announced_state_results")
+}
+
+model AnnouncedWardResult {
+  resultId          Int      @id @default(autoincrement()) @map("result_id")
+  wardName          String   @map("ward_name") @db.VarChar(50)
+  partyAbbreviation String   @map("party_abbreviation") @db.VarChar(10)
+  partyScore        Int      @map("party_score")
+  enteredByUser     String?  @map("entered_by_user") @db.VarChar(50)
+  dateEntered       DateTime @map("date_entered")
+  userIpAddress     String?  @map("user_ip_address") @db.VarChar(50)
+
+  @@map("announced_ward_results")
+}
